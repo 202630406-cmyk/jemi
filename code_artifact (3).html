@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>학교 급식 알리미 (NEIS 연동)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        * { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .ring-anim { animation: pulse-ring 2s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 flex flex-col items-center justify-start p-4 md:p-8">
+
+    <div class="w-full max-w-md space-y-4">
+        
+        <!-- Header -->
+        <header class="glass-card rounded-2xl p-6 shadow-xl border border-white/60 text-center relative overflow-hidden">
+            <div class="flex justify-between items-center mb-2 text-xs font-semibold text-slate-500">
+                <span id="liveClock" class="bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+                    <i class="far fa-clock mr-1 text-brand-500"></i>00:00:00
+                </span>
+                <span id="alarmStatusBadge" class="bg-amber-50 text-amber-600 border border-amber-200 px-3 py-1 rounded-full">
+                    <i class="fas fa-bell-slash mr-1"></i>알림 미설정
+                </span>
+            </div>
+            <h1 class="text-2xl font-black text-slate-800 flex items-center justify-center gap-2">
+                <span class="text-3xl">🍱</span> 학교 급식 알리미
+            </h1>
+            <p class="text-xs text-slate-500 mt-1">나이스(NEIS) 공식 실시간 연동</p>
+        </header>
+
+        <!-- Search School -->
+        <section class="glass-card rounded-2xl p-5 shadow-lg border border-white/60">
+            <h2 class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                <i class="fas fa-search text-brand-500"></i> 학교 검색
+            </h2>
+            <div class="flex gap-2">
+                <input type="text" id="schoolSearchInput" placeholder="학교 이름 입력 (예: 서울고, 역삼중)" 
+                    class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 text-sm bg-slate-50 focus:bg-white"
+                    onkeypress="if(event.key==='Enter') searchSchool()">
+                <button onclick="searchSchool()" id="searchBtn"
+                    class="bg-brand-500 hover:bg-brand-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-md active:scale-95">
+                    검색
+                </button>
+            </div>
+
+            <!-- Search Results Dropdown -->
+            <div id="searchResults" class="hidden mt-3 max-h-48 overflow-y-auto border border-slate-200 rounded-xl bg-white shadow-inner divide-y divide-slate-100 text-left"></div>
+
+            <!-- Selected School Badge -->
+            <div id="selectedSchoolBadge" class="hidden mt-3 p-3 bg-brand-50 border border-brand-100 rounded-xl flex items-center justify-between">
+                <div class="flex items-center gap-2 overflow-hidden">
+                    <i class="fas fa-school text-brand-500 flex-shrink-0"></i>
+                    <div class="truncate">
+                        <span id="selectedSchoolName" class="font-bold text-sm text-slate-800"></span>
+                        <span id="selectedSchoolRegion" class="text-xs text-slate-500 ml-1"></span>
+                    </div>
+                </div>
+                <button onclick="resetSchoolSelection()" class="text-xs text-slate-400 hover:text-red-500 px-2 py-1">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </section>
+
+        <!-- Today Meal Section -->
+        <section class="glass-card rounded-2xl p-5 shadow-lg border border-white/60">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-bold text-slate-700 flex items-center gap-2">
+                    <i class="fas fa-utensils text-brand-500"></i> 오늘의 급식
+                </h2>
+                <span id="todayDateTag" class="text-xs font-medium text-slate-400"></span>
+            </div>
+
+            <div id="mealLoading" class="hidden py-8 text-center">
+                <div class="inline-block animate-spin rounded-full h-7 w-7 border-4 border-brand-500 border-t-transparent"></div>
+                <p class="text-xs text-slate-500 mt-2">나이스에서 식단을 불러오는 중...</p>
+            </div>
+
+            <div id="mealContainer" class="min-h-[160px] bg-slate-50/80 border border-slate-200/80 rounded-xl p-5 text-center flex flex-col justify-center items-center">
+                <span class="text-3xl mb-2">🏫</span>
+                <p class="text-sm font-medium text-slate-600">위에서 학교를 검색하고 선택해주세요.</p>
+            </div>
+
+            <div id="mealMeta" class="hidden mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500 flex justify-between items-center">
+                <span id="calorieInfo"><i class="fas fa-fire text-orange-400 mr-1"></i>-- kcal</span>
+            </div>
+        </section>
+
+        <!-- Alarm Settings -->
+        <section class="glass-card rounded-2xl p-5 shadow-lg border border-white/60">
+            <h2 class="text-sm font-bold text-slate-700 mb-3 flex items-center justify-between">
+                <span class="flex items-center gap-2">
+                    <i class="fas fa-bell text-brand-500"></i> 점심시간 전 알림
+                </span>
+                <button onclick="testAlarm()" class="text-xs text-brand-500 bg-brand-50 border border-brand-100 hover:bg-brand-100 px-2 py-1 rounded-lg">
+                    테스트 소리
+                </button>
+            </h2>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-500 mb-1 block">알림 시간</label>
+                    <input type="time" id="alarmTimeInput" value="11:50" 
+                        class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500">
+                </div>
+                <div class="flex items-end">
+                    <button id="toggleAlarmBtn" onclick="toggleAlarmSetting()" 
+                        class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded-xl text-sm transition-all shadow-md">
+                        <span id="alarmBtnText">알림 켜기</span>
+                    </button>
+                </div>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-2">
+                * 이 웹페이지를 켜두시면 매일 지정한 시각에 알림음과 팝업창으로 오늘 급식을 알려줍니다.
+            </p>
+        </section>
+
+    </div>
+
+    <!-- Alarm Popup Modal -->
+    <div id="alarmModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 max-w-sm w-full text-center shadow-2xl border border-white ring-anim">
+            <div class="w-16 h-16 bg-brand-100 text-brand-500 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
+                🔔
+            </div>
+            <h3 class="text-xl font-black text-slate-800">오늘의 점심 급식!</h3>
+            <p class="text-xs text-brand-600 font-semibold mt-1" id="modalSchoolName">학교 급식 알림</p>
+            
+            <div id="modalMealList" class="my-4 p-4 bg-slate-50 rounded-2xl text-sm text-slate-700 font-medium max-h-48 overflow-y-auto leading-relaxed border border-slate-200 text-left">
+            </div>
+
+            <button onclick="closeAlarmModal()" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl shadow-lg transition-all text-sm">
+                맛있게 드세요!
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- JSONP SCRIPT INJECTOR FOR CORS BYPASS ---
+        function jsonp(url, callbackName) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                const scriptId = 'jsonp_' + Math.random().toString(36).substr(2, 9);
+                
+                window[callbackName] = function(data) {
+                    delete window[callbackName];
+                    document.body.removeChild(script);
+                    resolve(data);
+                };
+
+                script.id = scriptId;
+                script.src = url;
+                script.onerror = function() {
+                    delete window[callbackName];
+                    if (document.getElementById(scriptId)) {
+                        document.body.removeChild(script);
+                    }
+                    reject(new Error('JSONP Request Failed'));
+                };
+
+                document.body.appendChild(script);
+            });
+        }
+
+        // --- APP STATE ---
+        let state = {
+            selectedSchool: null,
+            alarmEnabled: false,
+            alarmTime: '11:50',
+            alarmTriggeredToday: false
+        };
+
+        const NEIS_KEY = "sample";
+
+        // --- INIT ---
+        window.addEventListener('DOMContentLoaded', () => {
+            initClock();
+            loadSavedData();
+            
+            const today = new Date();
+            const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+            document.getElementById('todayDateTag').innerText = dateStr;
+
+            if (state.selectedSchool) {
+                renderSelectedSchoolBadge();
+                fetchMealData();
+            }
+        });
+
+        function initClock() {
+            setInterval(() => {
+                const now = new Date();
+                const hrs = String(now.getHours()).padStart(2, '0');
+                const mins = String(now.getMinutes()).padStart(2, '0');
+                const secs = String(now.getSeconds()).padStart(2, '0');
+                document.getElementById('liveClock').innerHTML = `<i class="far fa-clock mr-1 text-brand-500"></i>${hrs}:${mins}:${secs}`;
+
+                if (state.alarmEnabled && hrs + ':' + mins === state.alarmTime && secs === '00' && !state.alarmTriggeredToday) {
+                    state.alarmTriggeredToday = true;
+                    triggerLunchAlarm();
+                }
+
+                if (hrs === '00' && mins === '00' && secs === '00') {
+                    state.alarmTriggeredToday = false;
+                }
+            }, 1000);
+        }
+
+        function loadSavedData() {
+            const saved = localStorage.getItem('neis_meal_school');
+            if (saved) {
+                try { state.selectedSchool = JSON.parse(saved); } catch(e){}
+            }
+            const savedTime = localStorage.getItem('neis_meal_time');
+            if (savedTime) {
+                state.alarmTime = savedTime;
+                document.getElementById('alarmTimeInput').value = savedTime;
+            }
+            const savedEnabled = localStorage.getItem('neis_meal_enabled');
+            if (savedEnabled !== null) {
+                state.alarmEnabled = (savedEnabled === 'true');
+                updateAlarmUI();
+            }
+        }
+
+        function saveData() {
+            if (state.selectedSchool) {
+                localStorage.setItem('neis_meal_school', JSON.stringify(state.selectedSchool));
+            } else {
+                localStorage.removeItem('neis_meal_school');
+            }
+            localStorage.setItem('neis_meal_time', state.alarmTime);
+            localStorage.setItem('neis_meal_enabled', state.alarmEnabled);
+        }
+
+        // --- NEIS API REAL INTEGRATION VIA JSONP ---
+        async function searchSchool() {
+            const query = document.getElementById('schoolSearchInput').value.trim();
+            if (!query) {
+                alert('학교 이름을 입력해 주세요 (예: 서울고)');
+                return;
+            }
+
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.classList.remove('hidden');
+            resultsDiv.innerHTML = `<div class="p-4 text-xs text-center text-slate-500"><i class="fas fa-spinner animate-spin mr-1"></i>나이스 서버 검색 중...</div>`;
+
+            const cbName = 'cb_school_' + Date.now();
+            const url = `https://open.neis.go.kr/hub/schoolInfo?KEY=${NEIS_KEY}&Type=json&pIndex=1&pSize=10&SCHUL_NM=${encodeURIComponent(query)}&pCallback=${cbName}`;
+
+            try {
+                const data = await jsonp(url, cbName);
+                if (data && data.schoolInfo) {
+                    const rows = data.schoolInfo[1].row;
+                    resultsDiv.innerHTML = '';
+                    rows.forEach(item => {
+                        const rowEl = document.createElement('div');
+                        rowEl.className = 'p-3 hover:bg-slate-50 cursor-pointer transition-colors';
+                        rowEl.innerHTML = `
+                            <div class="font-bold text-xs text-slate-800">${item.SCHUL_NM}</div>
+                            <div class="text-[11px] text-slate-400">${item.LCTN_SC_NM} | ${item.ORG_RDNMA || '주소 정보 없음'}</div>
+                        `;
+                        rowEl.onclick = () => selectSchool({
+                            atptCode: item.ATPT_OFCDC_SC_CODE,
+                            schoolCode: item.SD_SCHUL_CODE,
+                            name: item.SCHUL_NM,
+                            region: item.LCTN_SC_NM
+                        });
+                        resultsDiv.appendChild(rowEl);
+                    });
+                } else {
+                    resultsDiv.innerHTML = `<div class="p-4 text-xs text-center text-slate-400">검색 결과가 없습니다. 정확한 학교명을 입력하세요.</div>`;
+                }
+            } catch (err) {
+                resultsDiv.innerHTML = `<div class="p-4 text-xs text-center text-red-500">나이스 연동 실패. 네트워크 상태를 확인하세요.</div>`;
+            }
+        }
+
+        function selectSchool(schoolObj) {
+            state.selectedSchool = schoolObj;
+            saveData();
+            document.getElementById('searchResults').classList.add('hidden');
+            document.getElementById('schoolSearchInput').value = '';
+            renderSelectedSchoolBadge();
+            fetchMealData();
+        }
+
+        function renderSelectedSchoolBadge() {
+            if (!state.selectedSchool) return;
+            const badge = document.getElementById('selectedSchoolBadge');
+            document.getElementById('selectedSchoolName').innerText = state.selectedSchool.name;
+            document.getElementById('selectedSchoolRegion').innerText = `(${state.selectedSchool.region})`;
+            badge.classList.remove('hidden');
+        }
+
+        function resetSchoolSelection() {
+            state.selectedSchool = null;
+            saveData();
+            document.getElementById('selectedSchoolBadge').classList.add('hidden');
+            document.getElementById('mealContainer').innerHTML = `
+                <span class="text-3xl mb-2">🏫</span>
+                <p class="text-sm font-medium text-slate-600">위에서 학교를 검색하고 선택해주세요.</p>
+            `;
+            document.getElementById('mealMeta').classList.add('hidden');
+        }
+
+        async function fetchMealData() {
+            if (!state.selectedSchool) return;
+
+            const loading = document.getElementById('mealLoading');
+            const container = document.getElementById('mealContainer');
+            const meta = document.getElementById('mealMeta');
+
+            loading.classList.remove('hidden');
+            container.classList.add('hidden');
+            meta.classList.add('hidden');
+
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            const todayStr = `${yyyy}${mm}${dd}`;
+
+            const cbName = 'cb_meal_' + Date.now();
+            const url = `https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=${NEIS_KEY}&Type=json&ATPT_OFCDC_SC_CODE=${state.selectedSchool.atptCode}&SD_SCHUL_CODE=${state.selectedSchool.schoolCode}&MLSV_YMD=${todayStr}&pCallback=${cbName}`;
+
+            try {
+                const data = await jsonp(url, cbName);
+                loading.classList.add('hidden');
+                container.classList.remove('hidden');
+
+                if (data && data.mealServiceDietInfo) {
+                    const row = data.mealServiceDietInfo[1].row[0];
+                    const rawDish = row.DDISH_NM;
+                    const cal = row.CAL_INFO || '칼로리 정보 없음';
+
+                    const dishes = rawDish
+                        .replace(/<br\/>/g, '\n')
+                        .replace(/\([0-9.]+\)/g, '')
+                        .split('\n')
+                        .map(d => d.trim())
+                        .filter(d => d.length > 0);
+
+                    const htmlList = dishes.map(d => `
+                        <li class="py-1 text-sm font-semibold text-slate-800 flex items-center justify-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-brand-500 inline-block"></span>
+                            ${d}
+                        </li>
+                    `).join('');
+
+                    container.innerHTML = `<ul class="w-full space-y-0.5">${htmlList}</ul>`;
+                    document.getElementById('calorieInfo').innerHTML = `<i class="fas fa-fire text-orange-400 mr-1"></i>${cal}`;
+                    meta.classList.remove('hidden');
+
+                } else {
+                    container.innerHTML = `
+                        <span class="text-3xl mb-2">🎈</span>
+                        <p class="text-sm font-semibold text-slate-700">오늘 등록된 급식 메뉴가 없습니다.</p>
+                        <p class="text-xs text-slate-400 mt-1">주말, 공휴일 또는 방학일 수 있습니다.</p>
+                    `;
+                }
+
+            } catch (err) {
+                loading.classList.add('hidden');
+                container.classList.remove('hidden');
+                container.innerHTML = `
+                    <span class="text-3xl mb-2">⚠️</span>
+                    <p class="text-sm font-semibold text-red-500">급식 정보를 불러오지 못했습니다.</p>
+                `;
+            }
+        }
+
+        // --- ALARM SOUND & NOTIFICATION ---
+        function toggleAlarmSetting() {
+            state.alarmTime = document.getElementById('alarmTimeInput').value;
+            state.alarmEnabled = !state.alarmEnabled;
+
+            if (state.alarmEnabled && "Notification" in window) {
+                if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+                    Notification.requestPermission();
+                }
+            }
+            saveData();
+            updateAlarmUI();
+        }
+
+        function updateAlarmUI() {
+            const badge = document.getElementById('alarmStatusBadge');
+            const btnText = document.getElementById('alarmBtnText');
+
+            if (state.alarmEnabled) {
+                badge.className = "bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1 rounded-full font-semibold";
+                badge.innerHTML = `<i class="fas fa-bell mr-1"></i>알림 On (${state.alarmTime})`;
+                btnText.innerText = "알림 끄기";
+            } else {
+                badge.className = "bg-slate-100 text-slate-500 border border-slate-200 px-3 py-1 rounded-full";
+                badge.innerHTML = `<i class="fas fa-bell-slash mr-1"></i>알림 Off`;
+                btnText.innerText = "알림 켜기";
+            }
+        }
+
+        function playChime() {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const notes = [523.25, 659.25, 783.99, 1046.50];
+
+                notes.forEach((freq, idx) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    const startTime = ctx.currentTime + (idx * 0.15);
+                    gain.gain.setValueAtTime(0.3, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.8);
+                });
+            } catch(e) {}
+        }
+
+        function triggerLunchAlarm() {
+            playChime();
+            const schoolName = state.selectedSchool ? state.selectedSchool.name : '학교 급식';
+            const mealText = document.getElementById('mealContainer').innerText || '오늘의 급식을 확인하세요!';
+
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification(`🍱 오늘의 ${schoolName} 급식`, { body: mealText });
+            }
+
+            document.getElementById('modalSchoolName').innerText = schoolName;
+            document.getElementById('modalMealList').innerText = mealText;
+            document.getElementById('alarmModal').classList.remove('hidden');
+        }
+
+        function testAlarm() { triggerLunchAlarm(); }
+        function closeAlarmModal() { document.getElementById('alarmModal').classList.add('hidden'); }
+    </script>
+</body>
+</html>
